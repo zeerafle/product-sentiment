@@ -42,7 +42,7 @@ class TokopediaSpider(scrapy.Spider):
                 }
             )
 
-    async def parse(self, response):  # Make this an async method
+    def parse(self, response):  # Make this an async method
         # get the script tag. It is the second script inside the body tag
         # script = response.css("body script::text")[1].get()
         # data = chompjs.parse_js_object(script)
@@ -66,7 +66,7 @@ class TokopediaSpider(scrapy.Spider):
                 "star": star,
                 "review": review
             }
-                
+
             # Handle pagination if needed
             # next_page = response.css('button[aria-label="Laman berikutnya"]')
             # if next_page:
