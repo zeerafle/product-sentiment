@@ -1,7 +1,28 @@
+import json
+from base64 import b64decode
+
 import scrapy
-import chompjs
+import logging
+from rich.logging import RichHandler
 from urllib.parse import urlparse
 from dotenv import load_dotenv
+from scrapy.utils.log import configure_logging
+
+# Disable Scrapy's default logging
+configure_logging(install_root_handler=False)
+
+# Configure Rich logging
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="INFO",
+    format=FORMAT,
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
+
+# Make sure all Scrapy loggers use our configuration
+logger = logging.getLogger("scrapy")
+logger.propagate = True
 
 load_dotenv()
 
@@ -13,20 +34,15 @@ def modify_url(url):
 
 class TokopediaSpider(scrapy.Spider):
     name = 'tokopedia'
-    start_urls = ['https://www.tokopedia.com/liger-official/liger-handsfree-headset-earphone-l-10-metal-stereo-bass-merah?source=homepage.top_carousel.0.39123']
+    start_urls = [
+        'https://www.tokopedia.com/liger-official/liger-handsfree-headset-earphone-l-10-metal-stereo-bass-merah?source=homepage.top_carousel.0.39123']
 
     custom_settings = {
         "DOWNLOAD_DELAY": 2,
-        # zyte api settings to overcome anti-scraping
+        # use Zyte API to overcome website's anti-scraping prevention
         "ADDONS": {
             "scrapy_zyte_api.Addon": 500
-        },
-        # playwright settings to use headless browser
-        "TWISTED_REACTOR": 'twisted.internet.asyncioreactor.AsyncioSelectorReactor',
-        "DOWNLOAD_HANDLERS": {
-            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        },
+        }
     }
 
     def start_requests(self):  # Renamed from start to start_requests
@@ -36,41 +52,112 @@ class TokopediaSpider(scrapy.Spider):
                 url=modify_url(url),
                 dont_filter=True,
                 meta={
-                    # "zyte_api_automap": {"browserHtml": True},
-                    "plawright": True,
-                    "playwright_include_page": True,
+                    "zyte_api_automap": {
+                        "browserHtml": True,
+                        "javascript": True,
+                        "actions": [
+                                       # Wait for the pagination button to be available
+                                       {
+                                           "action": "waitForSelector",
+                                           "selector": {
+                                               "type": "css",
+                                               "value": 'button[aria-label="Laman berikutnya"]'
+                                           }
+                                       },
+                                       # Click the next page button
+                                       {
+                                           "action": "click",
+                                           "selector": {
+                                               "type": "css",
+                                               "value": 'button[aria-label="Laman berikutnya"]'
+                                           }
+                                       },
+                                       {
+                                           "action": "waitForResponse",
+                                           "urlPattern": "/productReviewList",
+                                           "urlMatchingOptions": "contains",
+                                           "timeout": 15,
+                                           "onError": "continue"
+                                       },
+                                   ] * 50,  # click the next button 50 times
+                        "networkCapture": [
+                            {
+                                "filterType": "url",
+                                "httpResponseBody": True,
+                                "value": "/productReviewList",
+                                "matchType": "contains",
+                            }
+                        ],
+                    },
                 }
             )
 
-    def parse(self, response):  # Make this an async method
-        # get the script tag. It is the second script inside the body tag
-        # script = response.css("body script::text")[1].get()
-        # data = chompjs.parse_js_object(script)
-        # self.logger.info(data)
+    def parse(self, response):
+        # extract and yield data from network capture
+        if 'networkCapture' in response.raw_api_response:
+            self.logger.info(f"Extracting data from network capture")
+            for capture in response.raw_api_response['networkCapture']:
+                data = json.loads(b64decode(capture["httpResponseBody"]).decode())
+                yield from self.process_review_data(data)
 
+        # extract data from html as fallback
+        self.logger.info(f"Extracting data from html")
+        shop_name = response.css("div[data-testid='llbPDPFooterShopName' h2::text").get()
+        parsed_url = urlparse(response.url)
+        shop_url = f"{parsed_url.scheme}://{parsed_url.netloc}/{parsed_url.path.split('/')[1]}"
 
-        for article in response.css("section#review-feed").css("article"):
+        for article in response.css("section#review-feed article"):
             text_star = article.css('div[class="rating"][data-testid="icnStarRating"]').attrib['aria-label']
             star = int(text_star.split(' ')[-1])
-            review_box = article.css('span[data-testid="lblItemUlasan"]')
-
-            # press "show more" button if available
-            p_review_box = article.xpath('.//span[@data-testid="lblItemUlasan"]/..')
-            show_more_button = p_review_box.css('button')
-            if show_more_button:
-                self.logger.info("Show more button found")
-
-            review = review_box.css('::text').get()
+            review = article.css('span[data-testid="lblItemUlasan"]::text').get()
 
             yield {
+                "product_id": "",
+                "shop_id": "",
+                "shop_name": shop_name,
+                "shop_url": shop_url,
+                "review_id": "",
                 "star": star,
-                "review": review
+                "review": review,
+                "source": "html",
+                "variant_name": "",
+                "is_anonymous": "",
             }
 
-            # Handle pagination if needed
-            # next_page = response.css('button[aria-label="Laman berikutnya"]')
-            # if next_page:
-            #     await page.click('button[aria-label="Laman berikutnya"]')
-            #     await asyncio.sleep(2)  # Wait for page to load
-            #     next_url = page.url
-            #     yield scrapy.Request(url=next_url, callback=self.parse, meta={"playwright": True, "playwright_include_page": True})
+    def process_review_data(self, data):
+        """Process review data from API response"""
+        try:
+            if 'data' in data[0] and 'productrevGetProductReviewList' in data[0]['data']:
+                product_reviews = data[0]['data']['productrevGetProductReviewList']
+                product_id = product_reviews['productID']
+                shop_id = product_reviews['shop']['shopID']
+                shop_name = product_reviews['shop']['name']
+                shop_url = product_reviews['shop']['url']
+
+                for review in product_reviews['list']:
+                    review_id = review['id']
+                    variant_name = review['variantName']
+                    message = review['message']
+                    rating = review['productRating']
+                    is_anonymous = review['isAnonymous']
+
+                    yield {
+                        "product_id": product_id,
+                        "shop_id": shop_id,
+                        "shop_name": shop_name,
+                        "shop_url": shop_url,
+                        "review_id": review_id,
+                        "star": rating,
+                        "review": message,
+                        "source": "api",
+                        "variant_name": variant_name,
+                        "is_anonymous": is_anonymous,
+                    }
+                    return None
+                return None
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error processing review data: {e}")
+            self.logger.debug(f"Data structure: {data}")
+            return []

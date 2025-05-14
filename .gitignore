@@ -6,3 +6,7 @@ __pycache__/
 .pdm-python
 
 .env
+
+/reviews.jsonl
+/tokopedia.html
+/productReviewList.json
