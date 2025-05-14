@@ -34,8 +34,6 @@ def modify_url(url):
 
 class TokopediaSpider(scrapy.Spider):
     name = 'tokopedia'
-    start_urls = [
-        'https://www.tokopedia.com/liger-official/liger-handsfree-headset-earphone-l-10-metal-stereo-bass-merah?source=homepage.top_carousel.0.39123']
 
     custom_settings = {
         "DOWNLOAD_DELAY": 2,
@@ -45,12 +43,38 @@ class TokopediaSpider(scrapy.Spider):
         }
     }
 
-    def start_requests(self):  # Renamed from start to start_requests
-        for url in self.start_urls:
-            # modify the url and set playwright integration
-            yield scrapy.Request(
+    def start_requests(self):
+        yield scrapy.Request(
+            url='https://www.tokopedia.com/discovery/deals',
+            callback=self.parse,
+            meta={
+                "zyte_api_automap": {
+                    "browserHtml": True,
+                    "javascript": True,
+                    "actions": [
+                        {
+                            "action": "scrollBottom",
+                            "onError": "continue"
+                        },
+                        {
+                            "action": "waitForSelector",
+                            "selector": {
+                                "type": "css",
+                                "value": "img[alt='product-image']"
+                            },
+                            "timeout": 15
+                        }
+                    ]
+                }
+            }
+        )
+
+    def parse(self, response):
+        for a in response.css('div.intersection-visible-wrapper div.carousel a'):
+            url = a.attrib['href']
+            yield response.follow(
                 url=modify_url(url),
-                dont_filter=True,
+                callback=self.parse_review,
                 meta={
                     "zyte_api_automap": {
                         "browserHtml": True,
@@ -92,19 +116,67 @@ class TokopediaSpider(scrapy.Spider):
                 }
             )
 
-    def parse(self, response):
+    # def start_requests(self):  # Renamed from start to start_requests
+    #     for url in self.start_urls:
+    #         # modify the url and set playwright integration
+    #         yield scrapy.Request(
+    #             url=modify_url(url),
+    #             dont_filter=True,
+    #             meta={
+    #                 "zyte_api_automap": {
+    #                     "browserHtml": True,
+    #                     "javascript": True,
+    #                     "actions": [
+    #                                    # Wait for the pagination button to be available
+    #                                    {
+    #                                        "action": "waitForSelector",
+    #                                        "selector": {
+    #                                            "type": "css",
+    #                                            "value": 'button[aria-label="Laman berikutnya"]'
+    #                                        }
+    #                                    },
+    #                                    # Click the next page button
+    #                                    {
+    #                                        "action": "click",
+    #                                        "selector": {
+    #                                            "type": "css",
+    #                                            "value": 'button[aria-label="Laman berikutnya"]'
+    #                                        }
+    #                                    },
+    #                                    {
+    #                                        "action": "waitForResponse",
+    #                                        "urlPattern": "/productReviewList",
+    #                                        "urlMatchingOptions": "contains",
+    #                                        "timeout": 15,
+    #                                        "onError": "continue"
+    #                                    },
+    #                                ] * 50,  # click the next button 50 times
+    #                     "networkCapture": [
+    #                         {
+    #                             "filterType": "url",
+    #                             "httpResponseBody": True,
+    #                             "value": "/productReviewList",
+    #                             "matchType": "contains",
+    #                         }
+    #                     ],
+    #                 },
+    #             }
+    #         )
+
+    def parse_review(self, response):
         # extract and yield data from network capture
         if 'networkCapture' in response.raw_api_response:
             self.logger.info(f"Extracting data from network capture")
             for capture in response.raw_api_response['networkCapture']:
                 data = json.loads(b64decode(capture["httpResponseBody"]).decode())
-                yield from self.process_review_data(data)
+                yield from self.process_review_data(data, response.url)
 
         # extract data from html as fallback
         self.logger.info(f"Extracting data from html")
-        shop_name = response.css("div[data-testid='llbPDPFooterShopName' h2::text").get()
+        shop_name = response.css("div[data-testid='llbPDPFooterShopName'] h2::text").get()
         parsed_url = urlparse(response.url)
         shop_url = f"{parsed_url.scheme}://{parsed_url.netloc}/{parsed_url.path.split('/')[1]}"
+        product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
 
         for article in response.css("section#review-feed article"):
             text_star = article.css('div[class="rating"][data-testid="icnStarRating"]').attrib['aria-label']
@@ -113,6 +185,7 @@ class TokopediaSpider(scrapy.Spider):
 
             yield {
                 "product_id": "",
+                "product_url": product_url,
                 "shop_id": "",
                 "shop_name": shop_name,
                 "shop_url": shop_url,
@@ -124,9 +197,12 @@ class TokopediaSpider(scrapy.Spider):
                 "is_anonymous": "",
             }
 
-    def process_review_data(self, data):
+    def process_review_data(self, data, url):
         """Process review data from API response"""
         try:
+            parsed_url = urlparse(url)
+            product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+
             if 'data' in data[0] and 'productrevGetProductReviewList' in data[0]['data']:
                 product_reviews = data[0]['data']['productrevGetProductReviewList']
                 product_id = product_reviews['productID']
@@ -143,6 +219,7 @@ class TokopediaSpider(scrapy.Spider):
 
                     yield {
                         "product_id": product_id,
+                        "product_url": product_url,
                         "shop_id": shop_id,
                         "shop_name": shop_name,
                         "shop_url": shop_url,
