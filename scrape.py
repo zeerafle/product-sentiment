@@ -20,7 +20,7 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 
-# Make sure all Scrapy loggers use our configuration
+# Make sure all Scrapy loggers use the configuration
 logger = logging.getLogger("scrapy")
 logger.propagate = True
 
@@ -34,6 +34,10 @@ def modify_url(url):
 
 class TokopediaSpider(scrapy.Spider):
     name = 'tokopedia'
+    start_urls = [
+        'https://www.tokopedia.com/discovery/deals',
+        'https://www.tokopedia.com/p/komputer-laptop'
+    ]
 
     custom_settings = {
         "DOWNLOAD_DELAY": 2,
@@ -44,33 +48,37 @@ class TokopediaSpider(scrapy.Spider):
     }
 
     def start_requests(self):
-        yield scrapy.Request(
-            url='https://www.tokopedia.com/discovery/deals',
-            callback=self.parse,
-            meta={
-                "zyte_api_automap": {
-                    "browserHtml": True,
-                    "javascript": True,
-                    "actions": [
-                        {
-                            "action": "scrollBottom",
-                            "onError": "continue"
-                        },
-                        {
-                            "action": "waitForSelector",
-                            "selector": {
-                                "type": "css",
-                                "value": "img[alt='product-image']"
+        for url in self.start_urls:
+            yield scrapy.Request(
+                url=url,
+                callback=self.parse,
+                meta={
+                    "zyte_api_automap": {
+                        "browserHtml": True,
+                        "javascript": True,
+                        "actions": [
+                            {
+                                "action": "scrollBottom",
+                                "onError": "continue",
+                                "scrollStep": 60
                             },
-                            "timeout": 15
-                        }
-                    ]
+                            {
+                                "action": "waitForSelector",
+                                "selector": {
+                                    "type": "css",
+                                    "value": "img[alt='product-image']"
+                                },
+                                "timeout": 15
+                            }
+                        ]
+                    }
                 }
-            }
-        )
+            )
 
     def parse(self, response):
-        for a in response.css('div.intersection-visible-wrapper div.carousel a'):
+        all_as = response.css('div.intersection-visible-wrapper div.carousel a') + response.css(
+            'div[id="divComp#67"] a')
+        for a in all_as:
             url = a.attrib['href']
             yield response.follow(
                 url=modify_url(url),
@@ -80,30 +88,30 @@ class TokopediaSpider(scrapy.Spider):
                         "browserHtml": True,
                         "javascript": True,
                         "actions": [
-                                       # Wait for the pagination button to be available
-                                       {
-                                           "action": "waitForSelector",
-                                           "selector": {
-                                               "type": "css",
-                                               "value": 'button[aria-label="Laman berikutnya"]'
-                                           }
-                                       },
-                                       # Click the next page button
-                                       {
-                                           "action": "click",
-                                           "selector": {
-                                               "type": "css",
-                                               "value": 'button[aria-label="Laman berikutnya"]'
-                                           }
-                                       },
-                                       {
-                                           "action": "waitForResponse",
-                                           "urlPattern": "/productReviewList",
-                                           "urlMatchingOptions": "contains",
-                                           "timeout": 15,
-                                           "onError": "continue"
-                                       },
-                                   ] * 50,  # click the next button 50 times
+                            {
+                                # Wait for the pagination button to be available
+                                "action": "waitForSelector",
+                                "selector": {
+                                    "type": "css",
+                                    "value": 'button[aria-label="Laman berikutnya"]'
+                                }
+                            },
+                            {
+                                # Click the next page button
+                                "action": "click",
+                                "selector": {
+                                    "type": "css",
+                                    "value": 'button[aria-label="Laman berikutnya"]'
+                                }
+                            },
+                            {
+                                "action": "waitForResponse",
+                                "urlPattern": "/productReviewList",
+                                "urlMatchingOptions": "contains",
+                                "timeout": 15,
+                                "onError": "continue"
+                            },
+                        ] * 50,  # click the next button 50 times
                         "networkCapture": [
                             {
                                 "filterType": "url",
@@ -115,53 +123,6 @@ class TokopediaSpider(scrapy.Spider):
                     },
                 }
             )
-
-    # def start_requests(self):  # Renamed from start to start_requests
-    #     for url in self.start_urls:
-    #         # modify the url and set playwright integration
-    #         yield scrapy.Request(
-    #             url=modify_url(url),
-    #             dont_filter=True,
-    #             meta={
-    #                 "zyte_api_automap": {
-    #                     "browserHtml": True,
-    #                     "javascript": True,
-    #                     "actions": [
-    #                                    # Wait for the pagination button to be available
-    #                                    {
-    #                                        "action": "waitForSelector",
-    #                                        "selector": {
-    #                                            "type": "css",
-    #                                            "value": 'button[aria-label="Laman berikutnya"]'
-    #                                        }
-    #                                    },
-    #                                    # Click the next page button
-    #                                    {
-    #                                        "action": "click",
-    #                                        "selector": {
-    #                                            "type": "css",
-    #                                            "value": 'button[aria-label="Laman berikutnya"]'
-    #                                        }
-    #                                    },
-    #                                    {
-    #                                        "action": "waitForResponse",
-    #                                        "urlPattern": "/productReviewList",
-    #                                        "urlMatchingOptions": "contains",
-    #                                        "timeout": 15,
-    #                                        "onError": "continue"
-    #                                    },
-    #                                ] * 50,  # click the next button 50 times
-    #                     "networkCapture": [
-    #                         {
-    #                             "filterType": "url",
-    #                             "httpResponseBody": True,
-    #                             "value": "/productReviewList",
-    #                             "matchType": "contains",
-    #                         }
-    #                     ],
-    #                 },
-    #             }
-    #         )
 
     def parse_review(self, response):
         # extract and yield data from network capture
@@ -176,7 +137,7 @@ class TokopediaSpider(scrapy.Spider):
         shop_name = response.css("div[data-testid='llbPDPFooterShopName'] h2::text").get()
         parsed_url = urlparse(response.url)
         shop_url = f"{parsed_url.scheme}://{parsed_url.netloc}/{parsed_url.path.split('/')[1]}"
-        product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+        product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{'/'.join(parsed_url.path.split('/')[:-1])}"
 
         for article in response.css("section#review-feed article"):
             text_star = article.css('div[class="rating"][data-testid="icnStarRating"]').attrib['aria-label']
@@ -201,7 +162,7 @@ class TokopediaSpider(scrapy.Spider):
         """Process review data from API response"""
         try:
             parsed_url = urlparse(url)
-            product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+            product_url = f"{parsed_url.scheme}://{parsed_url.netloc}{'/'.join(parsed_url.path.split('/')[:-1])}"
 
             if 'data' in data[0] and 'productrevGetProductReviewList' in data[0]['data']:
                 product_reviews = data[0]['data']['productrevGetProductReviewList']
