@@ -2,27 +2,9 @@ import json
 from base64 import b64decode
 
 import scrapy
-import logging
 from rich.logging import RichHandler
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-from scrapy.utils.log import configure_logging
-
-# Disable Scrapy's default logging
-configure_logging(install_root_handler=False)
-
-# Configure Rich logging
-FORMAT = "%(message)s"
-logging.basicConfig(
-    level="INFO",
-    format=FORMAT,
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)]
-)
-
-# Make sure all Scrapy loggers use the configuration
-logger = logging.getLogger("scrapy")
-logger.propagate = True
 
 load_dotenv()
 
@@ -36,7 +18,30 @@ class TokopediaSpider(scrapy.Spider):
     name = 'tokopedia'
     start_urls = [
         'https://www.tokopedia.com/discovery/deals',
-        'https://www.tokopedia.com/p/komputer-laptop'
+        'https://www.tokopedia.com/p/rumah-tangga',
+        'https://www.tokopedia.com/p/audio-kamera-elektronik-lainnya',
+        'https://www.tokopedia.com/p/buku',
+        'https://www.tokopedia.com/p/dapur',
+        'https://www.tokopedia.com/p/elektronik',
+        'https://www.tokopedia.com/p/fashion-anak-bayi',
+        'https://www.tokopedia.com/p/fashion-muslim',
+        'https://www.tokopedia.com/p/fashion-wanita',
+        'https://www.tokopedia.com/p/film-musik',
+        'https://www.tokopedia.com/p/gaming',
+        'https://www.tokopedia.com/p/handphone-tablet',
+        'https://www.tokopedia.com/p/ibu-bayi',
+        'https://www.tokopedia.com/p/kecantikan',
+        'https://www.tokopedia.com/p/kesehatan',
+        'https://www.tokopedia.com/p/komputer-laptop',
+        'https://www.tokopedia.com/p/mainan-hobi',
+        'https://www.tokopedia.com/p/makanan-minuman',
+        'https://www.tokopedia.com/p/office-stationery',
+        'https://www.tokopedia.com/p/olahraga',
+        'https://www.tokopedia.com/p/otomotif',
+        'https://www.tokopedia.com/p/perawatan-hewan',
+        'https://www.tokopedia.com/p/perawatan-tubuh',
+        'https://www.tokopedia.com/p/perlengkapan-pesta',
+        'https://www.tokopedia.com/p/pertukangan'
     ]
 
     custom_settings = {
@@ -57,6 +62,22 @@ class TokopediaSpider(scrapy.Spider):
                         "browserHtml": True,
                         "javascript": True,
                         "actions": [
+                            {
+                                "action": "waitForSelector",
+                                "selector": {
+                                    "type": "css",
+                                    "value": "article[aria-labelledby='unf-modal-title']"
+                                },
+                                "onError": "continue",
+                            },
+                            {
+                                "action": "click",
+                                "selector": {
+                                    "type": "css",
+                                    "value": "article[aria-labelledby='unf-modal-title'] button"
+                                },
+                                "onError": "continue",
+                            },
                             {
                                 "action": "scrollBottom",
                                 "onError": "continue",
@@ -88,6 +109,21 @@ class TokopediaSpider(scrapy.Spider):
                         "browserHtml": True,
                         "javascript": True,
                         "actions": [
+                            {
+                                "action": "waitForSelector",
+                                "selector": {
+                                    "type": "css",
+                                    "value": "section#review-feed article"
+                                }
+                            },
+                            {
+                                "action": "click",
+                                "selector": {
+                                    "type": "xpath",
+                                    "value": "//section[@id='review-feed']/article/div/p[2]/button"
+                                },
+                                "onError": "continue"
+                            },
                             {
                                 # Wait for the pagination button to be available
                                 "action": "waitForSelector",
