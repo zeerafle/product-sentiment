@@ -2,7 +2,6 @@ import json
 from base64 import b64decode
 
 import scrapy
-from rich.logging import RichHandler
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
