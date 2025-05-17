@@ -80,7 +80,7 @@ class TokopediaSpider(scrapy.Spider):
                             {
                                 "action": "scrollBottom",
                                 "onError": "continue",
-                                "scrollStep": 60
+                                "scrollStep": 70
                             },
                             {
                                 "action": "waitForSelector",
@@ -112,14 +112,14 @@ class TokopediaSpider(scrapy.Spider):
                                 "action": "waitForSelector",
                                 "selector": {
                                     "type": "css",
-                                    "value": "section#review-feed article"
+                                    "value": "section#review-feed article span[data-testid='lblItemUlasan']"
                                 }
                             },
                             {
                                 "action": "click",
                                 "selector": {
                                     "type": "xpath",
-                                    "value": "//section[@id='review-feed']/article/div/p[2]/button"
+                                    "value": "//section[@id='review-feed']/article//button[text()='Selengkapnya']"
                                 },
                                 "onError": "continue"
                             },
@@ -137,7 +137,8 @@ class TokopediaSpider(scrapy.Spider):
                                 "selector": {
                                     "type": "css",
                                     "value": 'button[aria-label="Laman berikutnya"]'
-                                }
+                                },
+                                "onError": "return" # stops the action chain if the button is not found
                             },
                             {
                                 "action": "waitForResponse",
@@ -146,7 +147,7 @@ class TokopediaSpider(scrapy.Spider):
                                 "timeout": 15,
                                 "onError": "continue"
                             },
-                        ] * 50,  # click the next button 50 times
+                        ] * 99,  # click the next button as many times as possible
                         "networkCapture": [
                             {
                                 "filterType": "url",
@@ -180,17 +181,17 @@ class TokopediaSpider(scrapy.Spider):
             review = article.css('span[data-testid="lblItemUlasan"]::text').get()
 
             yield {
-                "product_id": "",
+                "product_id": None,
                 "product_url": product_url,
-                "shop_id": "",
+                "shop_id": None,
                 "shop_name": shop_name,
                 "shop_url": shop_url,
-                "review_id": "",
+                "review_id": None,
                 "star": star,
                 "review": review,
                 "source": "html",
-                "variant_name": "",
-                "is_anonymous": "",
+                "variant_name": None,
+                "is_anonymous": None,
             }
 
     def process_review_data(self, data, url):
